@@ -45,7 +45,7 @@ module Control.Stasis(
                   Pod(..), FrozenPod(..),
                   -- * Operations
                   -- $ops
-                  stasis, version, put, get, fetch, freeze, defrost
+                  stasis, version, versionF, put, get, fetch, freeze, defrost
                   ) where
 import           Data.IORef(IORef, atomicModifyIORef', newIORef, readIORef)
 import qualified Data.Map.Strict  as M
@@ -60,7 +60,7 @@ data Pod a = Stasis { val :: IORef (PodContent a),
                     } deriving (Eq)
 
 data PodContent a = Content {contentVal :: a, stasisVersion :: Int}
-data FrozenPod a = FrozenPod { addr :: a, oPod :: Pod a}
+data FrozenPod a = FrozenPod { addr :: a, oPod :: Pod a, frozenAt :: Int}
 
 stasis :: a -> IO (Pod a)
 stasis v =    do p <- newIORef M.empty
@@ -72,20 +72,29 @@ put v p = atomicModifyIORef' (val p) $
                 \x -> let y = x{ contentVal = v, stasisVersion = stasisVersion x + 1}
                       in  (y,True)
 
+-- | Fetch the current version of a 'Pod'
 version :: Pod a -> IO Int 
 version v = do c <- readIORef(val v)
                return $ stasisVersion c
 
+-- | Fetch the version the value was frozen at
+versionF :: FrozenPod a -> Int 
+versionF = frozenAt
+
+-- | Get the value currently in 'Stasis'
 get :: Pod a -> IO a
 get pod = do c <- readIORef(val pod)
              return $ contentVal c
 
+-- | Fetch the frozen value from the given 'FrozenPod'
 fetch :: FrozenPod a -> a
 fetch = addr
 
+-- | Freeze the value of a at the current version
 freeze :: Ord a => Pod a -> IO (FrozenPod a)
 freeze p = do v <- get p
-              let fp =  FrozenPod { addr = v, oPod = p }
+              cv <- version p
+              let fp =  FrozenPod { addr = v, oPod = p, frozenAt = cv}
               m <- readIORef(frozenVersions p)
               let count = fromMaybe 0 (M.lookup v m) -- get current count or 0
               _ <- atomicModifyIORef' (frozenVersions p) $
